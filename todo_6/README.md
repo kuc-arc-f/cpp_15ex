@@ -41,5 +41,7 @@ g++ -std=c++17 main.cpp -o todo_app -lsqlite3 -lpthread
 ```
 
 ***
+### blog
 
+https://zenn.dev/knaka0209/scraps/c749d45737e72b
 
