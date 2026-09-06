@@ -1,13 +1,25 @@
-// main.cpp
-// Crow + libpqxx を使った TODO アプリ REST API
-// 機能: 登録(POST) / 一覧(GET) / 削除(DELETE)
-//#include <libpq-fe.h>
-
 #include "crow.h"
-#include <pqxx/pqxx>
 #include <cstdlib>
+#include <cstdio>
 #include <iostream>
+#include <memory>
+#include <libpq-fe.h>
+#include <vector>
 #include <string>
+#include <nlohmann/json.hpp>
+
+// JSON用エイリアス
+using json = nlohmann::json;
+
+std::string conn_str = "host=localhost port=5432 dbname=mydb user=root password=admin";
+
+struct TodoItem {
+    int id;
+    std::string title;
+    std::string created_at;
+};
+// これ一行で、struct <=> json の変換可能になります
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TodoItem, id, title, created_at)
 
 // 環境変数 DATABASE_URL があればそれを使用、なければデフォルト値を使用
 static std::string getConnStr() {
@@ -18,18 +30,159 @@ static std::string getConnStr() {
     return "postgresql://postgres:admin@localhost:5432/mydb123";
 }
 
-// pqxx の行から TODO の JSON を組み立てる
-static crow::json::wvalue rowToJson(const pqxx::row& row) {
-    crow::json::wvalue todo;
-    todo["id"] = row["id"].as<int>();
-    todo["title"] = row["title"].as<std::string>();
-    todo["done"] = row["done"].as<bool>();
-    todo["created_at"] = row["created_at"].as<std::string>();
-    return todo;
-}
+class TodoApp {
+private:
+    PGconn* conn;
+    std::mutex mtx; // 共有リソースを守るためのmutex
+
+    struct Todo {
+        int id;
+        std::string title;
+        std::string description;
+        bool completed;
+        std::string created_at;
+    };
+
+public:
+    TodoApp(const std::string& conn_str) {
+        conn = PQconnectdb(conn_str.c_str());
+        if (PQstatus(conn) != CONNECTION_OK) {
+            throw std::runtime_error("Connection failed: " + std::string(PQerrorMessage(conn)));
+        }
+        std::cout << "Connected to PostgreSQL successfully!\n";
+        initTable();
+    }
+
+    ~TodoApp() {
+        PQfinish(conn);
+    }
+
+    void initTable() {
+        const char* create_table = 
+            "CREATE TABLE IF NOT EXISTS todos ("
+            "id SERIAL PRIMARY KEY, "
+            "title TEXT NOT NULL, "
+            "description TEXT, "
+            "completed BOOLEAN DEFAULT FALSE, "
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ");";
+        
+        PGresult* res = PQexec(conn, create_table);
+        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+            PQclear(res);
+            throw std::runtime_error("Table creation failed: " + std::string(PQerrorMessage(conn)));
+        }
+        PQclear(res);
+        std::cout << "Table initialized successfully!\n";
+    }
+
+    // 登録機能
+    void addTodo(const std::string& title, const std::string& description = "") {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (title.empty()) {
+            std::cout << "Error: Title cannot be empty!\n";
+            return;
+        }
+
+        std::string query = "INSERT INTO todos (title) VALUES ($1);";
+        const char* params[1] = {title.c_str()};
+        PGresult* res = PQexecParams(conn, query.c_str(), 1, nullptr, params, nullptr, nullptr, 0);
+        
+        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+            std::cout << "Error adding todo: " << PQerrorMessage(conn) << "\n";
+        }
+        PQclear(res);
+    }
+
+    std::string listJson(bool showCompleted = false) {
+        std::string ret = "";
+        std::string query = "SELECT id, title, description, completed, created_at FROM todos";
+        if (!showCompleted) {
+            query += " WHERE completed = false";
+        }
+        query += " ORDER BY created_at DESC;";
+        
+        PGresult* res = PQexec(conn, query.c_str());
+        if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+            std::cout << "Error listing todos: " << PQerrorMessage(conn) << "\n";
+            PQclear(res);
+            return ret;
+        }
+
+        int rows = PQntuples(res);
+        if (rows == 0) {
+            std::cout << "No todos found.\n";
+            PQclear(res);
+            return ret;
+        }
+
+        std::vector<TodoItem> vec;
+        for (int i = 0; i < rows; i++) {
+            TodoItem row;
+            row.id = atoi(PQgetvalue(res, i, 0));
+            row.title = PQgetvalue(res, i, 1);
+            row.created_at = PQgetvalue(res, i, 4);
+            vec.push_back(row);        
+        }
+        PQclear(res);
+        json j1 = vec;
+        std::string json_str = j1.dump();        
+        ret = json_str;
+        return ret;
+    }
+
+    // 削除機能
+    void deleteTodo(int id) {
+        if (id <= 0) {
+            std::cout << "Error: Invalid ID!\n";
+            return;
+        }
+
+        std::string query = "DELETE FROM todos WHERE id = $1;";
+        const char* params[1] = {std::to_string(id).c_str()};
+        PGresult* res = PQexecParams(conn, query.c_str(), 1, nullptr, params, nullptr, nullptr, 0);
+        
+        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+            std::cout << "Error deleting todo: " << PQerrorMessage(conn) << "\n";
+        } else {
+            int affected = atoi(PQcmdTuples(res));
+            if (affected > 0) {
+                std::cout << "Todo " << id << " deleted successfully!\n";
+            } else {
+                std::cout << "Todo " << id << " not found!\n";
+            }
+        }
+        PQclear(res);
+    }
+
+    // 完了マーク機能（追加機能）
+    void completeTodo(int id) {
+        if (id <= 0) {
+            std::cout << "Error: Invalid ID!\n";
+            return;
+        }
+
+        std::string query = "UPDATE todos SET completed = true WHERE id = $1;";
+        const char* params[1] = {std::to_string(id).c_str()};
+        PGresult* res = PQexecParams(conn, query.c_str(), 1, nullptr, params, nullptr, nullptr, 0);
+        
+        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+            std::cout << "Error completing todo: " << PQerrorMessage(conn) << "\n";
+        } else {
+            int affected = atoi(PQcmdTuples(res));
+            if (affected > 0) {
+                std::cout << "Todo " << id << " marked as completed!\n";
+            } else {
+                std::cout << "Todo " << id << " not found!\n";
+            }
+        }
+        PQclear(res);
+    }
+};
 
 int main() {
     crow::SimpleApp app;
+    TodoApp todoDb(conn_str);
 
     // ヘルスチェック用
     CROW_ROUTE(app, "/health")
@@ -39,22 +192,12 @@ int main() {
 
     // ---------- 一覧取得 ----------
     CROW_ROUTE(app, "/todos").methods("GET"_method)
-    ([]() {
+    ([&todoDb]() {
         try {
-            pqxx::connection conn(getConnStr());
-            pqxx::work txn(conn);
-            pqxx::result r = txn.exec(
-                "SELECT id, title, done, created_at FROM todos ORDER BY id DESC"
-            );
-
-            std::vector<crow::json::wvalue> todos;
-            todos.reserve(r.size());
-            for (const auto& row : r) {
-                todos.push_back(rowToJson(row));
-            }
+            auto todos = todoDb.listJson(true);
 
             crow::json::wvalue result;
-            result["todos"] = std::move(todos);
+            result["todos"] = todos;
             return crow::response(200, result);
         } catch (const std::exception& e) {
             crow::json::wvalue err;
@@ -65,7 +208,7 @@ int main() {
 
     // ---------- 登録 ----------
     CROW_ROUTE(app, "/todos").methods("POST"_method)
-    ([](const crow::request& req) {
+    ([&todoDb](const crow::request& req) {
         auto body = crow::json::load(req.body);
         if (!body || !body.has("title")) {
             crow::json::wvalue err;
@@ -89,16 +232,10 @@ int main() {
         }
 
         try {
-            pqxx::connection conn(getConnStr());
-            pqxx::work txn(conn);
-            pqxx::result r = txn.exec_params(
-                "INSERT INTO todos (title) VALUES ($1) "
-                "RETURNING id, title, done, created_at",
-                title
-            );
-            txn.commit();
+            todoDb.addTodo(title, "");
+            crow::json::wvalue todo;
+            todo["title"] = title;
 
-            crow::json::wvalue todo = rowToJson(r[0]);
             return crow::response(201, todo);
         } catch (const std::exception& e) {
             crow::json::wvalue err;
@@ -109,32 +246,19 @@ int main() {
 
     // ---------- 削除 ----------
     CROW_ROUTE(app, "/todos/<int>").methods("DELETE"_method)
-    ([](int id) {
+    ([&todoDb](int id) {
         try {
-            pqxx::connection conn(getConnStr());
-            pqxx::work txn(conn);
-            pqxx::result r = txn.exec_params(
-                "DELETE FROM todos WHERE id = $1",
-                id
-            );
-            txn.commit();
-
-            if (r.affected_rows() == 0) {
-                crow::json::wvalue err;
-                err["error"] = "指定された id の TODO が見つかりません";
-                return crow::response(404, err);
-            }
-
+            todoDb.deleteTodo(id);
             crow::json::wvalue result;
             result["message"] = "deleted";
-            result["id"] = id;
             return crow::response(200, result);
         } catch (const std::exception& e) {
             crow::json::wvalue err;
             err["error"] = std::string("DB error: ") + e.what();
             return crow::response(500, err);
         }
-    });
+    });    
+
     app.port(8080).multithreaded().run();
     return 0;
 }

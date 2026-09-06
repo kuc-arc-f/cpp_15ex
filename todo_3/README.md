@@ -22,15 +22,8 @@ https://crowcpp.org/master/getting_started/setup/linux/
 ***
 * LIB add
 ```
-sudo apt update
-sudo apt install -y build-essential cmake libboost-system-dev \
-  libpqxx-dev postgresql-client pkg-config
-```
-
-***
-* DB set
-```
-export DATABASE_URL=postgresql://root:admin@localhost:5432/mydb
+sudo apt-get update
+sudo apt-get install libpq-dev
 ```
 
 ***
@@ -39,7 +32,7 @@ export DATABASE_URL=postgresql://root:admin@localhost:5432/mydb
 ***
 * build
 ```
-g++ -std=c++17 -I/usr/include/postgresql main.cpp -o user_api -lpqxx -lpthread
+g++ -std=c++17 -I/usr/include/postgresql main.cpp -o user_api -lpq -lpthread
 ```
 ***
 * start
