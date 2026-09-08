@@ -32,6 +32,7 @@ https://crowcpp.org/master/getting_started/setup/linux/
 ```
 sudo apt-get update
 sudo apt-get install libmysqlclient-dev
+sudo apt install nlohmann-json3-dev
 ```
 
 ***
