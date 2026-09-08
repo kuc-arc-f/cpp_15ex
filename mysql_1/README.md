@@ -73,5 +73,10 @@ curl http://localhost:8080/todos
 ```
 curl -X DELETE http://localhost:8080/todos/1
 ```
-***
 
+***
+### blog
+
+https://zenn.dev/knaka0209/scraps/d56e76f40c6cdd
+
+***
