@@ -59,3 +59,8 @@ select:todos:SELECT id , title FROM todos ORDER BY id DESC LIMIT 3;
 select:todos:SELECT id , title FROM todos WHERE id = 12295;
 ```
 ***
+### blog
+
+https://zenn.dev/link/comments/b2b12586d23656
+
+***
