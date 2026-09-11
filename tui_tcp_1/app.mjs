@@ -262,11 +262,13 @@ function App() {
     let target = trimmed;
     let responseText = "";
     let resp = libTcp.getJsonData(target);
-    responseText = send_tcp(resp);
-
+    let bl_update = target.startsWith("update:");
     let bl_select = target.startsWith("select:");
-    if(bl_select){
-      responseText = libTcp.getSelectText(responseText)
+    if(bl_update === true || bl_select === true){
+      responseText = send_tcp(resp);
+      if(bl_select){
+        responseText = libTcp.getSelectText(responseText)
+      }
     }
     const aiNow = (/* @__PURE__ */ new Date()).toLocaleTimeString("ja-JP", {
       hour: "2-digit",
