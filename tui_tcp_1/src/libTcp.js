@@ -11,21 +11,21 @@ const libTcp = {
     let retStr = "";
     let bl_update = target.startsWith("update:");
     let bl_select = target.startsWith("select:");
-    console.log("bl_update=", bl_update);
-    console.log("bl_select=", bl_select);
+    //console.log("bl_update=", bl_update);
+    //console.log("bl_select=", bl_select);
     let resp = "";
     if (bl_update) {
       const arr = target.split(":");
       if(arr && arr.length >= 2){
-        console.log("len=" , arr.length)
-        console.log(arr)
+        //console.log("len=" , arr.length)
+        //console.log(arr)
         const sendData = {
           action_name: "update",
           table: "",
           sql: arr[1]
         }
         const j1 = JSON.stringify(sendData)
-        console.log(j1)
+        //console.log(j1)
         retStr = j1;
         return retStr;
       }
@@ -33,28 +33,28 @@ const libTcp = {
     if (bl_select) {
       const arr = target.split(":");
       if(arr && arr.length === 2){
-        console.log("len=" , arr.length)
-        console.log(arr)
+        //console.log("len=" , arr.length)
+        //console.log(arr)
         const sendData = {
           action_name: "select",
           table: arr[1],
           sql: "SELECT * FROM " + arr[1] + ";"
         }
         const j1 = JSON.stringify(sendData)
-        console.log(j1)
+        //console.log(j1)
         retStr = j1;
         return retStr;
       }
       if(arr && arr.length === 3){
-        console.log("len=" , arr.length)
-        console.log(arr)
+        //console.log("len=" , arr.length)
+        //console.log(arr)
         const sendData = {
           action_name: "select",
           table: arr[1],
           sql: arr[2]
         }
         const j1 = JSON.stringify(sendData)
-        console.log(j1)
+        //console.log(j1)
         retStr = j1;
         return retStr;
       }
@@ -84,7 +84,7 @@ const libTcp = {
       });      
 
       let responseText = resp_head_str + "\n";
-      responseText = resp_row_str;
+      responseText += resp_row_str;
       return responseText;
   },
 
